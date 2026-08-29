@@ -23,10 +23,16 @@ def generate_docker_compose(num_clients):
     container_name: client_{id}
     depends_on:
       - server
+    volumes:
+      - ./input:/input:ro
+      - ./output:/output
     environment:
       - AGENCY_ID={id}
       - SERVER_HOST=server
       - SERVER_PORT=5678
+      - INPUT_FILE=/input/input-{id}.csv
+      - OUTPUT_FILE=/output/output-{id}.csv
+
 """
 
     clients_yaml = "".join(client_template.format(id=i) for i in range(num_clients))
