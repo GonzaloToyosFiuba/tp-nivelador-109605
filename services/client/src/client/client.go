@@ -2,20 +2,24 @@ package client
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/domain"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
-	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
 
-const ECHO_CLIENT_BUFFER_SIZE = 512
-const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
+// const ECHO_CLIENT_BUFFER_SIZE = 512
+// const ECHO_CLIENT_MESSAGE_AMOUNT = 3
+// const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
 
 type ClientConfig struct {
 	ServerHost string
@@ -63,8 +67,15 @@ func connectToServer(host, port string) (net.Conn, error) {
 }
 
 func (client *Client) Run() error {
-	const mainAction = "test-echo-server"
+	const mainAction = "process-bets"
 	defer client.conn.Close()
+
+	agencyIdNum, err := strconv.Atoi(client.config.AgencyId)
+	if err != nil {
+		logger.Error("invalid-agency-id", logger.Fail, "agency-id", client.config.AgencyId)
+		return fmt.Errorf("agency id inválido: %w", err)
+	}
+	agencyID := uint32(agencyIdNum)
 
 	inputFile, err := os.Open(client.config.InputFile)
 	if err != nil {
@@ -73,33 +84,21 @@ func (client *Client) Run() error {
 	}
 	defer inputFile.Close()
 
-	outputFile, err := os.Create(client.config.OutputFile)
-	if err != nil {
-		logger.Error("create-output-file", logger.Fail, "path", client.config.OutputFile)
-		return err
-	}
-	defer outputFile.Close()
-
 	scanner := bufio.NewScanner(inputFile)
-
 	for scanner.Scan() {
-		clientMessage := scanner.Text()
-
-		if err := safe_socket.SendAll(client.conn, []byte(clientMessage)); err != nil {
-			logger.Error("send-message", logger.Fail, "agency-id", client.config.AgencyId)
-			return err
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
 
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
+		bet, err := domain.ParseBetFromCSV(line)
 		if err != nil {
-			logger.Error("recv-response", logger.Fail, "agency-id", client.config.AgencyId)
-			return err
+			logger.Warn("parse-bet-fail", logger.Fail, "agency-id", client.config.AgencyId, "line", line)
+			continue
 		}
 
-		responseStr := string(responseBuffer)
-		_, err = outputFile.WriteString(responseStr + "\n")
-		if err != nil {
-			logger.Error("write-output", logger.Fail, "agency-id", client.config.AgencyId)
+		if err := protocol.SendBet(client.conn, agencyID, bet); err != nil {
+			logger.Error("send-bet-fail", logger.Fail, "agency-id", client.config.AgencyId)
 			return err
 		}
 	}
@@ -109,32 +108,51 @@ func (client *Client) Run() error {
 		return err
 	}
 
-	// for messageId := range ECHO_CLIENT_MESSAGE_AMOUNT {
-	// 	messageArgs := []any{"agency-id", client.config.AgencyId, "message-id", messageId}
-	// 	logger.Info(mainAction, logger.InProgress, messageArgs...)
+	if err := protocol.SendEnd(client.conn); err != nil {
+		logger.Error("send-end-fail", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
 
-	// 	clientMessage := client.config.AgencyId
+	winners, err := protocol.ReceiveWinners(client.conn)
+	if err != nil {
+		logger.Error("recv-winners-fail", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
 
-	// 	if err := safe_socket.SendAll(client.conn, []byte(clientMessage)); err != nil {
-	// 		logger.Error("send-message", logger.Fail, messageArgs...)
-	// 		return err
-	// 	}
-
-	// 	responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
-	// 	if err != nil {
-	// 		logger.Error("recv-response", logger.Fail, messageArgs...)
-	// 		return err
-	// 	}
-
-	// 	if string(responseBuffer) != clientMessage {
-	// 		logger.Error("check-response", logger.Fail, messageArgs...)
-	// 		return err
-	// 	}
-
-	// 	time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
-	// }
+	if err := client.saveWinners(winners); err != nil {
+		return err
+	}
 
 	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
+	return nil
+}
+
+// Crea un arhivo con el nombre establecido en Client.ClientConfig.OutpuFile
+// En el mismo guarda los ganadores de la apuesta recibidos desde el servidor
+// Cada línea se envía como estaba originalmente
+func (client *Client) saveWinners(winners []string) error {
+	outputFile, err := os.Create(client.config.OutputFile)
+	if err != nil {
+		logger.Error("create-output-file", logger.Fail, "path", client.config.OutputFile)
+		return err
+	}
+	defer outputFile.Close()
+
+	writer := bufio.NewWriter(outputFile)
+	for _, winner := range winners {
+		if strings.TrimSpace(winner) == "" {
+			continue
+		}
+		if _, err := writer.WriteString(winner + "\n"); err != nil {
+			logger.Error("write-output-fail", logger.Fail, "agency-id", client.config.AgencyId)
+			return err
+		}
+	}
+
+	if err := writer.Flush(); err != nil {
+		logger.Error("flush-output-fail", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
 
 	return nil
 }
