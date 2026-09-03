@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -11,9 +12,9 @@ import (
 )
 
 const (
-	MsgBet      byte = 0x01 // Apuesta
-	MsgEndBatch byte = 0x02 // Fin de apuestas
-	MsgWinners  byte = 0x03 // Respuesta del servidor con lista de ganadores
+	MsgBet     byte = 0x01 // Apuesta
+	MsgEnd     byte = 0x02 // Fin de apuestas
+	MsgWinners byte = 0x03 // Respuesta del servidor con lista de ganadores
 )
 
 const HeaderSize = 5 // 1 byte para el tipo, 4 para el largo del mensaje
@@ -62,20 +63,26 @@ func SerializeBet(agencyID uint32, bet *domain.Bet) []byte {
 	return payload
 }
 
-func SendBet(conn net.Conn, agencyID uint32, bet *domain.Bet) error {
-	payload := SerializeBet(agencyID, bet)
+func SendBetBatch(conn net.Conn, agencyID uint32, bets []*domain.Bet) error {
+	var payloadBuffer bytes.Buffer
+
+	for _, bet := range bets {
+		payloadBuffer.Write(SerializeBet(agencyID, bet))
+	}
+
+	payload := payloadBuffer.Bytes()
 	payloadLen := uint32(len(payload))
 
-	header := make([]byte, HeaderSize)
-	header[0] = MsgBet
-	binary.BigEndian.PutUint32(header[1:5], payloadLen)
+	batchHeader := make([]byte, HeaderSize)
+	batchHeader[0] = MsgBet
+	binary.BigEndian.PutUint32(batchHeader[1:5], payloadLen)
 
-	if err := safe_socket.SendAll(conn, header); err != nil {
-		return fmt.Errorf("error enviando header de apuesta: %w", err)
+	if err := safe_socket.SendAll(conn, batchHeader); err != nil {
+		return err
 	}
 
 	if err := safe_socket.SendAll(conn, payload); err != nil {
-		return fmt.Errorf("error enviando payload de apuesta: %w", err)
+		return err
 	}
 
 	return nil
@@ -83,7 +90,7 @@ func SendBet(conn net.Conn, agencyID uint32, bet *domain.Bet) error {
 
 func SendEnd(conn net.Conn) error {
 	header := make([]byte, HeaderSize)
-	header[0] = MsgEndBatch
+	header[0] = MsgEnd
 	binary.BigEndian.PutUint32(header[1:5], 0)
 
 	return safe_socket.SendAll(conn, header)

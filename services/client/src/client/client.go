@@ -2,7 +2,6 @@ package client
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -17,16 +16,13 @@ import (
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
 
-// const ECHO_CLIENT_BUFFER_SIZE = 512
-// const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-// const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
-
 type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyId   string
 	InputFile  string
 	OutputFile string
+	BatchSize  string
 }
 
 type Client struct {
@@ -73,7 +69,7 @@ func (client *Client) Run() error {
 	agencyIdNum, err := strconv.Atoi(client.config.AgencyId)
 	if err != nil {
 		logger.Error("invalid-agency-id", logger.Fail, "agency-id", client.config.AgencyId)
-		return fmt.Errorf("agency id inválido: %w", err)
+		return err
 	}
 	agencyID := uint32(agencyIdNum)
 
@@ -84,27 +80,14 @@ func (client *Client) Run() error {
 	}
 	defer inputFile.Close()
 
-	scanner := bufio.NewScanner(inputFile)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		bet, err := domain.ParseBetFromCSV(line)
-		if err != nil {
-			logger.Warn("parse-bet-fail", logger.Fail, "agency-id", client.config.AgencyId, "line", line)
-			continue
-		}
-
-		if err := protocol.SendBet(client.conn, agencyID, bet); err != nil {
-			logger.Error("send-bet-fail", logger.Fail, "agency-id", client.config.AgencyId)
-			return err
-		}
+	batchSize, err := strconv.Atoi(client.config.BatchSize)
+	if err != nil || batchSize <= 0 {
+		logger.Error("invalid-batch-size", logger.Fail, "batch-size", client.config.BatchSize)
+		return err
 	}
 
-	if err := scanner.Err(); err != nil {
-		logger.Error("read-input-file", logger.Fail, "agency-id", client.config.AgencyId)
+	if err := client.sendBets(inputFile, agencyID, batchSize); err != nil {
+		logger.Error("send-bets-fail", logger.Fail, "agency-id", client.config.AgencyId)
 		return err
 	}
 
@@ -124,6 +107,51 @@ func (client *Client) Run() error {
 	}
 
 	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
+	return nil
+}
+
+// Lee las apuestas desde el archivo inputFile y las procesa de a batches,
+// con tamaño configurable por parámetro
+// Tras procesar un batch de apuestas, las envía según el protocolo
+func (client *Client) sendBets(inputFile *os.File, agencyID uint32, batchSize int) error {
+	batch := make([]*domain.Bet, 0, batchSize)
+
+	scanner := bufio.NewScanner(inputFile)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		bet, err := domain.ParseBetFromCSV(line)
+		if err != nil {
+			logger.Warn("parse-bet-fail", logger.Fail, "agency-id", client.config.AgencyId, "line", line)
+			continue
+		}
+
+		batch = append(batch, bet)
+
+		if len(batch) >= batchSize {
+			if err := protocol.SendBetBatch(client.conn, agencyID, batch); err != nil {
+				logger.Error("send-bet-batch-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+
+	if len(batch) > 0 {
+		if err := protocol.SendBetBatch(client.conn, agencyID, batch); err != nil {
+			logger.Error("send-bet-batch-remanent-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
+			return err
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.Error("read-input-file", logger.Fail, "agency-id", client.config.AgencyId)
+		return err
+	}
+
 	return nil
 }
 

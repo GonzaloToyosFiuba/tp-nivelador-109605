@@ -11,8 +11,10 @@ class Server:
         self.lottery = lottery.Lottery(storage_path)
 
     def _handle_client(self, client_socket):
+        logger.info("HOLA", client_socket)
+
         action = "handle-client"
-        agency_bets = []
+        total_bets_count = 0
         current_agency_id = None
         
         try:
@@ -25,16 +27,17 @@ class Server:
                 msg_type = header[0]
                 payload_len = int.from_bytes(header[1:5], byteorder='big')
 
-                if msg_type == protocol.MSG_BET:
+                if msg_type == protocol.MSG_BET: 
                     payload = safe_socket.recv_all(client_socket, payload_len)
-                    bet = protocol.deserialize_bet(payload)
-                    agency_bets.append(bet)
-                    current_agency_id = bet.agency_id
+                    bets_batch = protocol.deserialize_bet_batch(payload)
+
+                    if bets_batch:
+                        self.lottery.store_bets(bets_batch)
+                        total_bets_count += len(bets_batch)
+                        if current_agency_id is None:
+                            current_agency_id = bets_batch[0].agency_id
 
                 elif msg_type == protocol.MSG_END:
-                    if agency_bets:
-                        self.lottery.store_bets(agency_bets)
-
                     winners = []
                     for bet in self.lottery.load_bets():
                         if bet.agency_id == current_agency_id and self.lottery.has_won(bet):
@@ -49,7 +52,7 @@ class Server:
                         "agency-id",
                         current_agency_id,
                         "bets-amount",
-                        len(agency_bets),
+                        total_bets_count,
                         "winners-amount",
                         len(winners),
                     )

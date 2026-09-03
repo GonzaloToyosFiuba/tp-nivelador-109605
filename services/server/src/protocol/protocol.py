@@ -12,44 +12,51 @@ DOC_SIZE = 4
 BIRTH_SIZE = 10
 NUM_SIZE = 4
 
-def deserialize_bet(payload: bytes) -> lottery.Bet:
+def deserialize_bet_batch(payload: bytes) -> list[lottery.Bet]:
+    bets = []
     offset = 0
+    total_len = len(payload)
 
-    # agency_id
-    agency_id = int.from_bytes(payload[offset:offset+AGENCY_SIZE], byteorder='big')
-    offset += AGENCY_SIZE
+    while offset < total_len:
+        # agency_id
+        agency_id = int.from_bytes(payload[offset:offset+AGENCY_SIZE], byteorder='big')
+        offset += AGENCY_SIZE
+    
+        # first_name
+        fn_len = payload[offset]
+        offset += 1
+        first_name = payload[offset:offset+fn_len].decode('utf-8')
+        offset += fn_len
+    
+        # last_name
+        ln_len = payload[offset]
+        offset += 1
+        last_name = payload[offset:offset+ln_len].decode('utf-8')
+        offset += ln_len
+    
+        # DNI
+        document = int.from_bytes(payload[offset:offset+DOC_SIZE], byteorder='big')
+        offset += DOC_SIZE
+    
+        # birthdate
+        birthdate = payload[offset:offset+BIRTH_SIZE].decode('utf-8')
+        offset += BIRTH_SIZE
+    
+        # number
+        number = int.from_bytes(payload[offset:offset+NUM_SIZE], byteorder='big')
+        offset += NUM_SIZE
+        
 
-    # first_name
-    fn_len = payload[offset]
-    offset += 1
-    first_name = payload[offset:offset+fn_len].decode('utf-8')
-    offset += fn_len
+        bets.append(lottery.Bet(
+            agency_id=agency_id,
+            first_name=first_name,
+            last_name=last_name,
+            document=document,
+            birthdate=birthdate,
+            number=number,
+        ))
 
-    # last_name
-    ln_len = payload[offset]
-    offset += 1
-    last_name = payload[offset:offset+ln_len].decode('utf-8')
-    offset += ln_len
-
-    # DNI
-    document = int.from_bytes(payload[offset:offset+DOC_SIZE], byteorder='big')
-    offset += DOC_SIZE
-
-    # birthdate
-    birthdate = payload[offset:offset+BIRTH_SIZE].decode('utf-8')
-    offset += BIRTH_SIZE
-
-    # number
-    number = int.from_bytes(payload[offset:offset+NUM_SIZE], byteorder='big')
-
-    return lottery.Bet(
-        agency_id=agency_id,
-        first_name=first_name,
-        last_name=last_name,
-        document=document,
-        birthdate=birthdate,
-        number=number,
-    )
+    return bets
 
 def serialize_winners(winners: list[lottery.Bet]) -> bytes:
     lines = []
