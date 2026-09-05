@@ -13,6 +13,7 @@ def generate_docker_compose(num_clients, batch_size=50):
       - PYTHONUNBUFFERED=1
       - SERVER_HOST=server
       - SERVER_PORT=5678
+      - AGENCY_QUORUM_MIN=3
 """
 
     client_template = """
