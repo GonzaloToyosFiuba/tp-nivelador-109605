@@ -33,7 +33,7 @@ func RecvAll(socket io.Reader, size int) ([]byte, error) {
 
 		if err != nil {
 			if err == io.EOF && bytes_read < size {
-				return nil, fmt.Errorf("conexion cerrada antes de leer los %d bytes requeridos (se leyeron %d)", size, bytes_read)
+				return nil, fmt.Errorf("conexión cerrada antes de leer los %d bytes requeridos (se leyeron %d)", size, bytes_read)
 			}
 			return nil, err
 		}

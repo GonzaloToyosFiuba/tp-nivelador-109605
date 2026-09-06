@@ -8,8 +8,6 @@ def send_all(socket: socket.socket, bytes):
 
     while bytes_sent < size:
         n = socket.send(bytes[bytes_sent:])
-        if n == 0:
-            raise RuntimeError("La conexión con el socket se cerró durante el envío")
         
         bytes_sent += n
 

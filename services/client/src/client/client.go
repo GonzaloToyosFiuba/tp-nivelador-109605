@@ -26,8 +26,9 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	conn   net.Conn
-	config ClientConfig
+	conn    net.Conn
+	config  ClientConfig
+	sigterm bool
 }
 
 func NewClient(config ClientConfig) (*Client, error) {
@@ -37,7 +38,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	client := &Client{conn: conn, config: config}
+	client := &Client{conn: conn, config: config, sigterm: false}
 	return client, nil
 }
 
@@ -60,6 +61,11 @@ func connectToServer(host, port string) (net.Conn, error) {
 	}
 
 	return conn, err
+}
+
+func (client *Client) Safe_close() {
+	client.sigterm = true
+	client.conn.Close()
 }
 
 func (client *Client) Run() error {
@@ -87,17 +93,26 @@ func (client *Client) Run() error {
 	}
 
 	if err := client.sendBets(inputFile, agencyID, batchSize); err != nil {
+		if client.sigterm {
+			return nil
+		}
 		logger.Error("send-bets-fail", logger.Fail, "agency-id", client.config.AgencyId)
 		return err
 	}
 
 	if err := protocol.SendEnd(client.conn); err != nil {
+		if client.sigterm {
+			return nil
+		}
 		logger.Error("send-end-fail", logger.Fail, "agency-id", client.config.AgencyId)
 		return err
 	}
 
 	winners, err := protocol.ReceiveWinners(client.conn)
 	if err != nil {
+		if client.sigterm {
+			return nil
+		}
 		logger.Error("recv-winners-fail", logger.Fail, "agency-id", client.config.AgencyId)
 		return err
 	}
