@@ -33,31 +33,25 @@ func SerializeBet(agencyID uint32, bet *domain.Bet) []byte {
 
 	offset := 0
 
-	// Agency ID
 	binary.BigEndian.PutUint32(payload[offset:offset+4], agencyID)
 	offset += AgencySize
 
-	// First name
 	payload[offset] = byte(len(firstNameBytes))
 	offset++
 	copy(payload[offset:], firstNameBytes)
 	offset += len(firstNameBytes)
 
-	// Last name
 	payload[offset] = byte(len(lastNameBytes))
 	offset++
 	copy(payload[offset:], lastNameBytes)
 	offset += len(lastNameBytes)
 
-	// DNI
 	binary.BigEndian.PutUint32(payload[offset:offset+DocSize], uint32(bet.Document))
 	offset += DocSize
 
-	// BirthDate
 	copy(payload[offset:], birthdateBytes)
 	offset += BirthSize
 
-	// Number
 	binary.BigEndian.PutUint32(payload[offset:offset+NumSize], uint32(bet.Number))
 
 	return payload
@@ -73,19 +67,16 @@ func SendBetBatch(conn net.Conn, agencyID uint32, bets []*domain.Bet) error {
 	payload := payloadBuffer.Bytes()
 	payloadLen := uint32(len(payload))
 
+	var packetBuffer bytes.Buffer
+
 	batchHeader := make([]byte, HeaderSize)
 	batchHeader[0] = MsgBet
 	binary.BigEndian.PutUint32(batchHeader[1:5], payloadLen)
 
-	if err := safe_socket.SendAll(conn, batchHeader); err != nil {
-		return err
-	}
+	packetBuffer.Write(batchHeader)
+	packetBuffer.Write(payload)
 
-	if err := safe_socket.SendAll(conn, payload); err != nil {
-		return err
-	}
-
-	return nil
+	return safe_socket.SendAll(conn, packetBuffer.Bytes())
 }
 
 func SendEnd(conn net.Conn) error {

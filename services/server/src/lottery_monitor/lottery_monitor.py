@@ -18,9 +18,5 @@ class LotteryMonitor:
 
     # Provee acceso thread safe al método load_bets de Lottery
     def load_bets(self) -> Iterator[lottery.Bet]:
-        self.lock.acquire()
-        try:
-            for bet in self.lottery.load_bets():
-                yield bet
-        finally:
-            self.lock.release()
+        with self.lock:
+            yield from self.lottery.load_bets()
