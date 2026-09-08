@@ -15,6 +15,7 @@ const (
 	MsgBet     byte = 0x01 // Apuesta
 	MsgEnd     byte = 0x02 // Fin de apuestas
 	MsgWinners byte = 0x03 // Respuesta del servidor con lista de ganadores
+	MsgAck     byte = 0x04 // Ack del server tras recibir un batch de apuestas
 )
 
 const HeaderSize = 5 // 1 byte para el tipo, 4 para el largo del mensaje
@@ -77,6 +78,20 @@ func SendBetBatch(conn net.Conn, agencyID uint32, bets []*domain.Bet) error {
 	packetBuffer.Write(payload)
 
 	return safe_socket.SendAll(conn, packetBuffer.Bytes())
+}
+
+func WaitBatchAck(conn net.Conn) error {
+	header, err := safe_socket.RecvAll(conn, HeaderSize)
+	if err != nil {
+		return fmt.Errorf("error leyendo header de ack: %w", err)
+	}
+
+	msgType := header[0]
+	if msgType != MsgAck {
+		return fmt.Errorf("tipo de mensaje inesperado: %d", msgType)
+	}
+
+	return nil
 }
 
 func SendEnd(conn net.Conn) error {

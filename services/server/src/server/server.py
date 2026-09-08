@@ -82,6 +82,9 @@ class Server:
                         if current_agency_id is None:
                             current_agency_id = bets_batch[0].agency_id
 
+                    ack_msg = protocol.serialize_ack()
+                    safe_socket.send_all(client_socket, ack_msg)
+
                 elif msg_type == protocol.MSG_END:
                     logger.info("waiting-quorum", logger.LogResult.in_progress, "agency-id", current_agency_id)
 

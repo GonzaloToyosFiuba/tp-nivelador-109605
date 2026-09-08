@@ -5,6 +5,7 @@ import logger
 MSG_BET = 1
 MSG_END = 2
 MSG_WINNERS = 3
+MSG_ACK = 4
 
 HEADER_SIZE = 5 # 1 byte para el tipo, 4 para el largo del mensaje
 AGENCY_SIZE = 4
@@ -51,6 +52,12 @@ def deserialize_bet_batch(payload: bytes) -> list[lottery.Bet]:
         ))
 
     return bets
+
+def serialize_ack() -> bytes:
+    header = bytearray(HEADER_SIZE)
+    header[0] = MSG_ACK
+    header[1:5] = (0).to_bytes(4, byteorder='big')
+    return bytes(header)
 
 def serialize_winners(winners: list[lottery.Bet]) -> bytes:
     lines = []

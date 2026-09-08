@@ -128,6 +128,7 @@ func (client *Client) Run() error {
 // Lee las apuestas desde el archivo inputFile y las procesa de a batches,
 // con tamaño configurable por parámetro
 // Tras procesar un batch de apuestas, las envía según el protocolo
+// Y espera el ACK por parte del servidor antes de continuar con el siguiente batch
 func (client *Client) sendBets(inputFile *os.File, agencyID uint32, batchSize int) error {
 	batch := make([]*domain.Bet, 0, batchSize)
 
@@ -151,6 +152,10 @@ func (client *Client) sendBets(inputFile *os.File, agencyID uint32, batchSize in
 				logger.Error("send-bet-batch-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
 				return err
 			}
+			if err := protocol.WaitBatchAck(client.conn); err != nil {
+				logger.Error("wait-batch-ack-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
+				return err
+			}
 			batch = batch[:0]
 		}
 	}
@@ -158,6 +163,10 @@ func (client *Client) sendBets(inputFile *os.File, agencyID uint32, batchSize in
 	if len(batch) > 0 {
 		if err := protocol.SendBetBatch(client.conn, agencyID, batch); err != nil {
 			logger.Error("send-bet-batch-remanent-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
+			return err
+		}
+		if err := protocol.WaitBatchAck(client.conn); err != nil {
+			logger.Error("wait-batch-ack-fail", logger.Fail, "agency-id", client.config.AgencyId, "err", err)
 			return err
 		}
 	}
