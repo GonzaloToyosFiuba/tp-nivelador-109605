@@ -60,13 +60,23 @@ def serialize_ack() -> bytes:
     return bytes(header)
 
 def serialize_winners(winners: list[lottery.Bet]) -> bytes:
-    lines = []
-    for bet in winners:
-        line = f"{bet.first_name},{bet.last_name},{bet.document},{bet.birthdate},{bet.number}"
-        lines.append(line)
+    payload = bytearray()
 
-    payload_str = "\n".join(lines)
-    payload = payload_str.encode('utf-8')
+    for bet in winners:
+        fn_bytes = bet.first_name.encode('utf-8')
+        payload.append(len(fn_bytes))
+        payload.extend(fn_bytes)
+
+        ln_bytes = bet.last_name.encode('utf-8')
+        payload.append(len(ln_bytes))
+        payload.extend(ln_bytes)
+
+        payload.extend(bet.document.to_bytes(DOC_SIZE, byteorder='big'))
+
+        payload.extend(bet.birthdate.encode('utf-8'))
+
+        payload.extend(bet.number.to_bytes(NUM_SIZE, byteorder='big'))
+
     payload_len = len(payload)
 
     header = bytearray(HEADER_SIZE)

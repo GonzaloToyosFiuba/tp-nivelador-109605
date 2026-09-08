@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/domain"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
@@ -34,7 +33,7 @@ func SerializeBet(agencyID uint32, bet *domain.Bet) []byte {
 
 	offset := 0
 
-	binary.BigEndian.PutUint32(payload[offset:offset+4], agencyID)
+	binary.BigEndian.PutUint32(payload[offset:offset+AgencySize], agencyID)
 	offset += AgencySize
 
 	payload[offset] = byte(len(firstNameBytes))
@@ -123,10 +122,33 @@ func ReceiveWinners(conn net.Conn) ([]string, error) {
 		return nil, fmt.Errorf("error leyendo ganadores: %w", err)
 	}
 
-	winnersStr := string(payload)
-	if strings.TrimSpace(winnersStr) == "" {
-		return []string{}, nil
+	winners := []string{}
+	offset := 0
+	totalLen := len(payload)
+
+	for offset < totalLen {
+		fnLen := int(payload[offset])
+		offset++
+		firstName := string(payload[offset : offset+fnLen])
+		offset += fnLen
+
+		lnLen := int(payload[offset])
+		offset++
+		lastName := string(payload[offset : offset+lnLen])
+		offset += lnLen
+
+		document := binary.BigEndian.Uint32(payload[offset : offset+DocSize])
+		offset += DocSize
+
+		birthdate := string(payload[offset : offset+BirthSize])
+		offset += BirthSize
+
+		number := binary.BigEndian.Uint32(payload[offset : offset+NumSize])
+		offset += NumSize
+
+		winnerStr := fmt.Sprintf("%s,%s,%d,%s,%d", firstName, lastName, document, birthdate, number)
+		winners = append(winners, winnerStr)
 	}
 
-	return strings.Split(winnersStr, "\n"), nil
+	return winners, nil
 }
