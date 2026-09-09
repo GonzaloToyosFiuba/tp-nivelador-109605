@@ -1,52 +1,136 @@
+import os
 import socket
+import threading
 import logger
 import safe_socket
-
-_ECHO_SERVER_MESSAGE_SIZE = 1024
-
+import lottery_monitor
+import protocol
+import signal
 
 class Server:
-    def __init__(self, server_host: str, server_port: int) -> None:
+    def __init__(self, server_host: str, server_port: int, storage_path: str) -> None:
+        self.running = True
+        self.client_sockets : list[socket.socket] = []
+        self.threads : list[threading.Thread] = []
+
         self.server_host = server_host
         self.server_port = server_port
+        self.lottery_monitor = lottery_monitor.LotteryMonitor(storage_path)
+        self.server_socket : socket.socket = None
+
+        self.quorum_min = int(os.getenv("AGENCY_QUORUM_MIN", "1"))
+        self.barrier = threading.Barrier(self.quorum_min)
+
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _signal_handler(self, signum, frame):
+        logger.info("server-aborted", logger.LogResult.in_progress)
+        self.running = False
+
+        try:
+            self.barrier.abort()
+        except Exception:
+            pass
+
+        if self.server_socket:
+            try:
+                self.server_socket.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+
+            try:
+                self.server_socket.close()
+            except Exception:
+                pass
+
+        for socket in self.client_sockets:
+            try:
+                socket.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+
+            try:
+                socket.close()
+            except Exception:
+                pass
+
+        for thread in self.threads:
+            thread.join()
 
     def _handle_client(self, client_socket):
         action = "handle-client"
-        message_amount = 0
+        total_bets_count = 0
+        current_agency_id = None
+        
         try:
             logger.info(action, logger.LogResult.in_progress)
             while True:
-                client_message = safe_socket.recv_all(
-                    client_socket, _ECHO_SERVER_MESSAGE_SIZE
-                )
-                if not client_message:
-                    logger.info(
-                        action,
-                        logger.LogResult.success,
-                        "messages-amount",
-                        message_amount,
-                    )
+                header = safe_socket.recv_all(client_socket, protocol.HEADER_SIZE)
+                if not header:
+                    break
+
+                msg_type = header[0]
+                payload_len = int.from_bytes(header[1:5], byteorder='big')
+
+                if msg_type == protocol.MSG_BET: 
+                    payload = safe_socket.recv_all(client_socket, payload_len)
+                    bets_batch = protocol.deserialize_bet_batch(payload)
+
+                    if bets_batch:
+                        self.lottery_monitor.store_bets(bets_batch)
+                        total_bets_count += len(bets_batch)
+                        if current_agency_id is None:
+                            current_agency_id = bets_batch[0].agency_id
+
+                    ack_msg = protocol.serialize_ack()
+                    safe_socket.send_all(client_socket, ack_msg)
+
+                elif msg_type == protocol.MSG_END:
+                    logger.info("waiting-quorum", logger.LogResult.in_progress, "agency-id", current_agency_id)
+
+                    self.barrier.wait()
+
+                    winners = []
+                    for bet in self.lottery_monitor.load_bets():
+                        if bet.agency_id == current_agency_id and self.lottery_monitor.has_won(bet):
+                            winners.append(bet)
+
+                    response_msg = protocol.serialize_winners(winners)
+                    safe_socket.send_all(client_socket, response_msg)
+
+                    logger.info(action, logger.LogResult.success, "agency-id", current_agency_id,
+                        "bets-amount", total_bets_count, "winners-amount", len(winners),)
                     return
-                message_amount += 1
-                safe_socket.send_all(client_socket, client_message)
+        except threading.BrokenBarrierError:
+            return
         except Exception as e:
-            logger.error(
-                action, logger.LogResult.fail, "messages-amount", message_amount
-            )
+            logger.error(action, logger.LogResult.fail, "agency-id",current_agency_id,)
             raise e
+        
+        finally:
+            client_socket.close()
 
     def run(self):
         action = "accept-connection"
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind((self.server_host, self.server_port))
-            server_socket.listen()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self.server_socket:
+            self.server_socket.bind((self.server_host, self.server_port))
+            self.server_socket.listen()
+
             while True:
                 try:
                     logger.info(action, logger.LogResult.in_progress)
-                    client_socket, _ = server_socket.accept()
+                    client_socket, _ = self.server_socket.accept()
+                    self.client_sockets.append(client_socket)
+
+                    client_thread = threading.Thread(
+                        target=self._handle_client, 
+                        args=(client_socket,)
+                    )
+                    self.threads.append(client_thread)
+
+                    client_thread.start()
                 except Exception as e:
+                    if not self.running:
+                        break 
                     logger.error(action, logger.LogResult.fail)
                     raise e
-                logger.info(action, logger.LogResult.success)
-
-                self._handle_client(client_socket)

@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"os"
+	"os/signal"
+	"syscall"
 
 	client "github.com/7574-sistemas-distribuidos/tp-nivelador/src/client"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
@@ -24,11 +26,37 @@ func loadConfig() (client.ClientConfig, error) {
 		return client.ClientConfig{}, errors.New("SERVER_PORT environment variable is required")
 	}
 
+	inputFile := os.Getenv("INPUT_FILE")
+	if inputFile == "" {
+		return client.ClientConfig{}, errors.New("INPUT_FILE environment variable is required")
+	}
+
+	outputFile := os.Getenv("OUTPUT_FILE")
+	if outputFile == "" {
+		return client.ClientConfig{}, errors.New("OUTPUT_FILE environment variable is required")
+	}
+
+	batchSize := os.Getenv("BATCH_SIZE")
+	if batchSize == "" {
+		return client.ClientConfig{}, errors.New("BATCH_SIZE environment variable is required")
+	}
+
 	return client.ClientConfig{
 		ServerHost: serverHost,
 		ServerPort: serverPort,
 		AgencyId:   agencyId,
+		InputFile:  inputFile,
+		OutputFile: outputFile,
+		BatchSize:  batchSize,
 	}, nil
+}
+
+func sigterm_handler(client *client.Client) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGTERM)
+
+	<-c
+	client.Safe_close()
 }
 
 func run() int {
@@ -43,6 +71,8 @@ func run() int {
 		logger.Error("client-new", logger.Fail, "err", err)
 		return 1
 	}
+
+	go sigterm_handler(client)
 
 	if err := client.Run(); err != nil {
 		logger.Error("client-run", logger.Fail, "err", err)
